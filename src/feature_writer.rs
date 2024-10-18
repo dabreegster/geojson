@@ -16,6 +16,7 @@ enum State {
 pub struct FeatureWriter<W: Write> {
     writer: W,
     state: State,
+    newline: bool,
 }
 
 impl<W: Write> FeatureWriter<W> {
@@ -31,7 +32,18 @@ impl<W: Write> FeatureWriter<W> {
         Self {
             writer,
             state: State::New,
+            newline: false,
         }
+    }
+
+    pub fn set_newline(&mut self) -> Result<()> {
+        if self.state != State::New {
+            return Err(Error::InvalidWriterState(
+                "cannot set newline mode after starting to write",
+            ));
+        }
+        self.newline = true;
+        Ok(())
     }
 
     /// Write a [`crate::Feature`] struct to the output stream. If you'd like to
@@ -48,7 +60,7 @@ impl<W: Write> FeatureWriter<W> {
                 self.state = State::WritingFeatures;
             }
             State::WritingFeatures => {
-                self.write_str(",")?;
+                self.write_str(if self.newline { "\n" } else { "," })?;
             }
             State::WritingForeignMembers => {
                 self.write_str(r#" "features": ["#)?;
@@ -169,7 +181,7 @@ impl<W: Write> FeatureWriter<W> {
                 self.state = State::WritingFeatures;
             }
             State::WritingFeatures => {
-                self.write_str(",")?;
+                self.write_str(if self.newline { "\n" } else { "," })?;
             }
             State::WritingForeignMembers => {
                 self.write_str(r#" "features": ["#)?;
@@ -191,6 +203,12 @@ impl<W: Write> FeatureWriter<W> {
                 "cannot write foreign member when writer has already finished",
             )),
             State::New => {
+                if self.newline {
+                    return Err(Error::InvalidWriterState(
+                        "cannot write foreign members in newline mode",
+                    ));
+                }
+
                 self.write_str(r#"{ "type": "FeatureCollection", "#)?;
                 write!(self.writer, "\"{key}\": ")?;
                 serde_json::to_writer(&mut self.writer, value)?;
@@ -244,11 +262,19 @@ impl<W: Write> FeatureWriter<W> {
     }
 
     fn write_prefix(&mut self) -> Result<()> {
-        self.write_str(r#"{ "type": "FeatureCollection", "features": ["#)
+        if self.newline {
+            Ok(())
+        } else {
+            self.write_str(r#"{ "type": "FeatureCollection", "features": ["#)
+        }
     }
 
     fn write_suffix(&mut self) -> Result<()> {
-        self.write_str("]}")
+        if self.newline {
+            Ok(())
+        } else {
+            self.write_str("]}")
+        }
     }
 
     fn write_str(&mut self, text: &str) -> Result<()> {
@@ -267,6 +293,7 @@ impl<W: Write> Drop for FeatureWriter<W> {
     }
 }
 
+// TODO Update tests
 #[cfg(test)]
 mod tests {
     use super::*;
